@@ -38,3 +38,6 @@
 - 默认阅读视图宽度调整为 80%
 - 去除工具条中的下载按钮
 - 开启自动页面滚动后，滚动到底部将在 5s 后自动切换下一章
+
+## 演示
+![image](https://github.com/null-object-0000/fanqie-novel-assistant/assets/15605610/001a9940-85c4-40d4-b42b-3643e6af1c6a)
