@@ -70,11 +70,7 @@
                 /**
                  * 自动滚动速度，单位毫秒
                  */
-                autoScrollSpeed: 50,
-                /**
-                 * 到底部后，等待多少秒自动翻页
-                 */
-                autoJumpPageSpeed: 5 * 1000
+                autoScrollSpeed: 50
             }
 
             // 优先从 localStorage 中获取配置，没有就用默认配置，判断版本号是否一致，不一致就用默认配置
@@ -114,18 +110,19 @@
 
     // 优先从 localStorage 中获取配置，没有就用默认配置
     const config = utils.initConfig()
+    const titleNavWidth = '300px'
 
     const style = document.createElement('style');
 
     const pageWidthStyle = `
         #app div.muye-reader div.muye-reader-inner {
-            width: ${config.width};
-            max-width: ${config.width};
+            width: calc(${config.width} - ${titleNavWidth});
+            max-width: calc(${config.width} - ${titleNavWidth});
         }
 
         .muye-reader-nav {
-            width: calc(${config.width} - 15px);
-            max-width: calc(${config.width} - 15px);
+            width: calc(${config.width} - 15px - ${titleNavWidth});
+            max-width: calc(${config.width} - 15px - ${titleNavWidth});
         }
     `;
 
@@ -133,7 +130,7 @@
         ${config.width ? pageWidthStyle : ''}
 
         .reader-toolbar {
-            right: calc(15%);
+            left: 85%;
         }
 
         .reader-toolbar > div > div {
@@ -154,6 +151,28 @@
             color: #fff;
             border-radius: 5px;
             z-index: 999;
+        }
+
+        .line-space {
+            height: 52px;
+            width: 100%;
+        }
+        
+        .auto-header-title {
+            position: absolute;
+            top: 50%;
+            transform: translate(0, -50%);
+            font-size: 16px;
+            width: 295px;
+            left: 5px;
+            font-weight: bold;
+        }
+
+        .auto-header-title h1 {
+            font-size: unset;
+            font-weight: unset;
+            margin: unset;
+            padding-bottom: 5px;
         }
     `;
     document.head.appendChild(style);
@@ -184,19 +203,6 @@
                 // 根据页面高度计算进度，保留两位小数
                 const progress = (reader.scrollTop / (reader.scrollHeight - reader.offsetHeight) * 100).toFixed(1);
                 utils.toast(`已开启自动滚动，按 Esc 可退出，当前进度：${progress}%，当前速度：${config.autoScrollSpeed}`, 0);
-
-                // 到底部了，等待 5s 自动翻页
-                if (progress >= 100) {
-                    autoScrollBtn.setAttribute('status', 'off');
-                    clearInterval(window.autoScrollTimer);
-                    utils.toast(`已到底部，等待 ${config.autoJumpPageSpeed / 1000}s 自动翻页`, config.autoJumpPageSpeed)
-                    setTimeout(() => {
-                        nextChapter();
-                        setTimeout(() => {
-                            autoScroll()
-                        }, config.autoJumpPageSpeed);
-                    }, config.autoJumpPageSpeed);
-                }
             }, config.autoScrollSpeed);
         }
     }
@@ -260,4 +266,127 @@
             }
         }
     })
+
+    const analysisChapterData = (html) => {
+        if (!html || html.indexOf('window.__INITIAL_STATE__=') === -1) {
+            return null;
+        }
+
+        const startIndex = html.indexOf('window.__INITIAL_STATE__=')
+        const endIndex = html.indexOf('</script>', startIndex)
+        let jsonStr = html.substring(startIndex + 25, endIndex - 1)
+        // 找到结尾的 ;
+        const lastSemicolonIndex = jsonStr.lastIndexOf(';')
+        jsonStr = jsonStr.substring(0, lastSemicolonIndex)
+        const data = JSON.parse(jsonStr)
+        console.log('analysisChapterData', data)
+        const result = data.reader.chapterData;
+
+        const contentHtmlStartIndex = html.indexOf('<div class="muye-reader-box-header">');
+        const contentHtmlEndIndex = html.indexOf('<div class="muye-reader-btns">', contentHtmlStartIndex);
+        const $content_html = html.substring(contentHtmlStartIndex, contentHtmlEndIndex);
+
+        result.$content_html = $content_html
+
+        return result
+    };
+
+    window.$fna = {
+        next_item_id: null,
+        item_loading: false,
+        item_content_caches: {}
+    }
+
+    window.onload = () => {
+        window.$fna.next_item_id = window.__INITIAL_STATE__.reader.chapterData.nextItemId;
+        window.$fna.item_loading = false
+        console.log('window.$fna.next_item_id', window.$fna.next_item_id)
+    }
+
+    const preloadNextChapter = async ({ itemId, skipCache }) => {
+        if (window.$fna.item_content_caches[itemId] && skipCache !== true) {
+            return window.$fna.item_content_caches[itemId]
+        }
+
+        const response = await fetch(`https://fanqienovel.com/reader/${itemId}?enter_from=reader`, {
+            "method": "GET",
+        });
+        const html = await response.text()
+
+        const chapterData = analysisChapterData(html);
+        window.$fna.item_loading = false
+        window.$fna.item_content_caches[itemId] = chapterData
+
+        return chapterData
+    }
+
+    const loadNextChapter = async ({ itemId, skipCache }) => {
+        if (window.$fna.item_loading === true) {
+            return
+        }
+
+        if (window.$fna.item_content_caches[itemId] && skipCache !== true) {
+            return window.$fna.item_content_caches[itemId]
+        }
+
+        window.$fna.item_loading = true
+
+        const chapterData = await preloadNextChapter({ itemId, skipCache })
+        preloadNextChapter({ itemId: chapterData.nextItemId, skipCache: true })
+
+        window.$fna.item_loading = false
+
+        return chapterData
+    }
+
+    const reader = document.querySelector('#app .muye-reader');
+    reader.addEventListener('scroll', (event) => {
+        console.log('scroll', event);
+
+        document.querySelector('.muye-reader-btns').style.display = 'none';
+
+        const scrollTop = event.target.scrollTop;
+        const scrollHeight = event.target.scrollHeight;
+        const offsetHeight = event.target.offsetHeight;
+        const progress = (scrollTop / (scrollHeight - offsetHeight) * 100).toFixed(4);
+        console.log('progress', progress)
+        if (progress >= 90) {
+            loadNextChapter({ itemId: window.$fna.next_item_id })
+                .then(({ $content_html, nextItemId }) => {
+                    const readerBoxElement = document.querySelector('#app .muye-reader .muye-reader-inner .muye-reader-box');
+                    readerBoxElement.innerHTML = readerBoxElement.innerHTML + '<div class="line-space"></div>' + $content_html;
+                    window.$fna.next_item_id = nextItemId;
+
+                    const titles = document.querySelectorAll('h1.muye-reader-title')
+                    // 获取所有标题，赋值到要给字符串数组中
+                    const titleArr = []
+                    titles.forEach((title) => {
+                        titleArr.push(`<h1>${title.innerText}</h1>`)
+                    })
+
+                    // 在 #app div 中插入一个 auto-header-title 的 div，用于存放标题
+                    // 如果存在就先删掉
+                    let autoHeaderTitleElement = document.querySelector('#app div.auto-header-title')
+                    autoHeaderTitleElement && autoHeaderTitleElement.remove()
+
+                    autoHeaderTitleElement = document.createElement('div')
+                    autoHeaderTitleElement.className = 'auto-header-title'
+                    autoHeaderTitleElement.innerHTML = titleArr.join('')
+
+                    document.querySelector('#app div').appendChild(autoHeaderTitleElement)
+
+                    document.querySelectorAll('#app div.auto-header-title h1').forEach((item, index) => {
+                        item.onclick = () => {
+                            console.log('click', index)
+                            // 滚动到对应的标题，稍微往上偏移一点，平滑滚动
+                            const titles = document.querySelectorAll('h1.muye-reader-title')
+                            titles[index].scrollIntoView({
+                                behavior: 'smooth'
+                            })
+                        }
+                    })
+                })
+        }
+    })
+
 })();
