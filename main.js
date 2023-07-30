@@ -116,7 +116,8 @@
     const config = utils.initConfig()
 
     const style = document.createElement('style');
-    style.innerHTML = `
+
+    const pageWidthStyle = `
         #app div.muye-reader div.muye-reader-inner {
             width: ${config.width};
             max-width: ${config.width};
@@ -126,6 +127,10 @@
             width: calc(${config.width} - 15px);
             max-width: calc(${config.width} - 15px);
         }
+    `;
+
+    style.innerHTML = `
+        ${config.width ? pageWidthStyle : ''}
 
         .reader-toolbar {
             right: calc(15%);
